@@ -299,7 +299,7 @@ def get_visual_studio_info (preference = ''):
     toolchain_prefix = ''
     toolchain_path   = ''
     toolchain_ver    = ''
-    vs_ver_list      = ['2019', '2017']
+    vs_ver_list      = ['2022', '2019', '2017']
     vs_ver_list_old  = ['2015', '2013']
 
     if preference:
@@ -836,6 +836,26 @@ def align_pad_file (src, dst, val, mode = STITCH_OPS.MODE_FILE_ALIGN, pos = STIT
     if pos == STITCH_OPS.MODE_POS_TAIL:
         fo.write(padding)
     fo.close()
+
+def gen_smbios_bin(yaml_file, bin_file):
+    with open(yaml_file, 'r') as f:
+        # Read and filter YAML file: remove empty lines, comments (starting with #),
+        # and the YAML header line (smbios_strings:)
+        lines = [line.strip() for line in f.readlines()
+                if line.strip() and not line.strip().startswith('#')
+                and not line.strip().startswith('smbios_strings:')]
+
+    with open(bin_file, 'wb') as out:
+        i = 0
+        while i < len(lines):
+            # Assume each entry has exactly 3 lines: - type:, idx:, string
+            type_val = int(lines[i].split(':')[1].split('#')[0].strip())
+            idx_val = int(lines[i+1].split(':')[1].split('#')[0].strip())
+            string_val = lines[i+2].split('"')[1]  # Assumes string is quoted
+
+            out.write(struct.pack('BB', type_val, idx_val))
+            out.write(string_val.encode('ascii') + b'\0')
+            i += 3  # Skip to next entry
 
 def gen_actm_file (brd_pkg_name, actm_bin, actm_file):
     # Copy ACTM file

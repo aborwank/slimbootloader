@@ -35,9 +35,8 @@
 #include <Library/PlatformHookLib.h>
 #include <Library/SmbiosInitLib.h>
 #include <Library/BdatLib.h>
+#include <Library/PciEnumerationLib.h>
 #include <Guid/GraphicsInfoHob.h>
-#include <Guid/SystemTableInfoGuid.h>
-#include <Guid/SerialPortInfoGuid.h>
 #include <Guid/OsConfigDataHobGuid.h>
 #include <Guid/SmmInformationGuid.h>
 #include <IndustryStandard/Acpi.h>
@@ -93,7 +92,6 @@
 #include <Library/MtlPchInfoLib.h>
 #include <Library/MtlPchPcieRpLib.h>
 #include <Library/MtlSocInfoLib.h>
-#include <Guid/PciRootBridgeInfoGuid.h>
 
 #define V_EPOC_XTAL_38_4_MHZ  0x38400000
 //

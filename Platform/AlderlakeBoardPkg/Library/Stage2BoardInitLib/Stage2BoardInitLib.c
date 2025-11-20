@@ -19,6 +19,7 @@
 #include <Library/FusaConfigLib.h>
 #include <Library/MediaAccessLib.h>
 #include "SioChip.h"
+#include <Library/TxtLib.h>
 
 GLOBAL_REMOVE_IF_UNREFERENCED UINT8    mBigCoreCount;
 GLOBAL_REMOVE_IF_UNREFERENCED UINT8    mSmallCoreCount;
@@ -452,6 +453,7 @@ BoardInit (
   BL_SW_SMI_INFO            *BlSwSmiInfo;
   FEATURES_DATA             *FeatureCfgData;
   UINT32                    Data;
+  FEATURES_CFG_DATA         *FeaturesCfgData;
 
   SiCfgData = NULL;
 
@@ -549,8 +551,9 @@ BoardInit (
       }
     }
     BuildOsConfigDataHob ();
+    // Override the Smbios default Info using SMBIOS binary blob
     if (FeaturePcdGet (PcdSmbiosEnabled)) {
-      InitializeSmbiosInfo ();
+      LoadSmbiosStringsFromComponent (SIGNATURE_32 ('I', 'P', 'F', 'W'), SIGNATURE_32 ('S', 'M', 'B', 'S'));
     }
 
     if ((SiCfgData != NULL) && (SiCfgData->EcAvailable == 0)) {
@@ -602,6 +605,22 @@ BoardInit (
         TriggerPayloadSwSmi (BlSwSmiInfo->BlSwSmiHandlerInput);
       }
     }
+
+    ///
+    /// Initialize TXT Before ACPI initialization.
+    /// This will update the correct TXT enabled state in ACPI table.
+    ///
+    if (FeaturePcdGet (PcdTxtEnabled)) {
+      FeaturesCfgData = (FEATURES_CFG_DATA *) FindConfigDataByTag(CDATA_FEATURES_TAG);
+      if (FeaturesCfgData->Features.TxtEnabled == 1) {
+        if (GetBootMode() != BOOT_ON_S3_RESUME) {
+          InitTxt();
+        } else {
+          TxtS3Restore();
+        }
+      }
+    }
+
     break;
   case PrePayloadLoading:
     Status = FixUpFlashMapEntry();
@@ -667,6 +686,14 @@ BoardInit (
     }
     break;
   case ReadyToBoot:
+    if (FeaturePcdGet (PcdTxtEnabled)) {
+      FeaturesCfgData = (FEATURES_CFG_DATA *) FindConfigDataByTag(CDATA_FEATURES_TAG);
+      if ((FeaturesCfgData->Features.TxtEnabled == 1)
+                  && (GetBootMode() != BOOT_ON_S3_RESUME)) {
+          TxtS3Resume();
+      }
+    }
+
     if ((GetBootMode() != BOOT_ON_FLASH_UPDATE) && (GetPayloadId() == 0)) {
       ProgramSecuritySetting ();
       //
@@ -781,32 +808,6 @@ SaveNvsData (
 
   DEBUG ((DEBUG_INFO, "SaveNvsData Done - %r\n", Status));
   return Status;
-}
-
-/**
- Update serial port information to global HOB data structure.
-
- @param SerialPortInfo  Pointer to global HOB data structure.
- **/
-VOID
-EFIAPI
-UpdateSerialPortInfo (
-  IN  SERIAL_PORT_INFO  *SerialPortInfo
-  )
-{
-  SerialPortInfo->BaseAddr64 = GetSerialPortBase ();
-  SerialPortInfo->BaseAddr   = (UINT32) SerialPortInfo->BaseAddr64;
-  SerialPortInfo->RegWidth = GetSerialPortStrideSize ();
-  if (GetDebugPort () >= GetPchMaxSerialIoUartControllersNum ()) {
-    // IO Type
-    SerialPortInfo->Type = 1;
-  } else {
-    // MMIO Type
-    SerialPortInfo->Type = 2;
-  }
-
-  DEBUG ((DEBUG_INFO, "SerialPortInfo Type=%d BaseAddr=0x%08X RegWidth=%d\n",
-    SerialPortInfo->Type, SerialPortInfo->BaseAddr, SerialPortInfo->RegWidth));
 }
 
 /**
@@ -971,8 +972,6 @@ PlatformUpdateHobInfo (
     UpdateFrameBufferInfo (HobInfo);
   } else if (Guid == &gEfiGraphicsDeviceInfoHobGuid) {
     UpdateFrameBufferDeviceInfo (HobInfo);
-  } else if (Guid == &gLoaderSerialPortInfoGuid) {
-    UpdateSerialPortInfo (HobInfo);
   } else if (Guid == &gOsBootOptionGuid) {
     UpdateOsBootMediumInfo (HobInfo);
   } else if (Guid == &gSmmInformationGuid) {

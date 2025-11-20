@@ -179,7 +179,7 @@ NormalBootPath (
   PldMachine = IS_X64 ? IMAGE_FILE_MACHINE_X64 : IMAGE_FILE_MACHINE_I386;
 
   Status  = EFI_SUCCESS;
-  if (Dst[0] == 0x00005A4D) {
+  if (FeaturePcdGet (PcdPe32SupportEnabled) && (Dst[0] == 0x00005A4D)) {
     // It is a PE format
     DEBUG ((DEBUG_INFO, "PE32 Format Payload\n"));
     Status = PeCoffRelocateImage ((UINT32)(UINTN)Dst);
@@ -209,12 +209,12 @@ NormalBootPath (
     // ASSUME 64bit payload. Need get arch info if need support 32bit payload
     PldMachine = IMAGE_FILE_MACHINE_X64;
     PldEntry   = (PAYLOAD_ENTRY)(UINTN)Context.PayloadEntryPoint;
-  } else if (Dst[10] == EFI_FVH_SIGNATURE) {
+  } else if (FeaturePcdGet (PcdFvSupportEnabled) && (Dst[10] == EFI_FVH_SIGNATURE)) {
     // It is a FV format
     DEBUG ((DEBUG_INFO, "FV Format Payload\n"));
     UefiSig = Dst[0];
     Status  = LoadFvImage (Dst, Stage2Param->PayloadActualLength, (VOID **)&PldEntry, &PldMachine);
-  } else if (IsElfFormat ((CONST UINT8 *)Dst)) {
+  } else if (FeaturePcdGet (PcdElfSupportEnabled) && IsElfFormat ((CONST UINT8 *)Dst)) {
     DEBUG ((DEBUG_INFO, "ELF Format Payload\n"));
     // Assume Universal Payload first
     ZeroMem (&PayloadInfo, sizeof(PayloadInfo));
@@ -297,12 +297,10 @@ NormalBootPath (
     CallBoardNotify = TRUE;
   }
 
-  if (FixedPcdGetBool (PcdSmpEnabled)) {
-    // Only delay MpInitDone for OsLoader
-    if ((PayloadId != 0) || (GetBootMode() == BOOT_ON_FLASH_UPDATE)) {
-      Status = MpInit (EnumMpInitDone);
-      AddMeasurePoint (0x31C0);
-    }
+  // Only delay MpInitDone for OsLoader
+  if ((PayloadId != 0) || (GetBootMode() == BOOT_ON_FLASH_UPDATE)) {
+    Status = MpInit (EnumMpInitDone);
+    AddMeasurePoint (0x31C0);
   }
 
   if (CallBoardNotify) {
@@ -376,10 +374,8 @@ S3ResumePath (
   LdrGlobal = (LOADER_GLOBAL_DATA *)GetLoaderGlobalDataPointer();
   S3Data    = (S3_DATA *)LdrGlobal->S3DataPtr;
 
-  if (FixedPcdGetBool (PcdSmpEnabled)) {
-    MpInit (EnumMpInitDone);
-    AddMeasurePoint (0x31C0);
-  }
+  MpInit (EnumMpInitDone);
+  AddMeasurePoint (0x31C0);
 
   // Call the board notification
   BoardInit (EndOfStages);
@@ -516,11 +512,6 @@ SecStartup (
   AddMeasurePoint (0x3030);
   FspResetHandler (Status);
 
-
-  if (FixedPcdGetBool (PcdSmbiosEnabled)) {
-    InitSmbiosStringPtr ();
-  }
-
   BoardInit (PostSiliconInit);
   AddMeasurePoint (0x3040);
 
@@ -537,6 +528,7 @@ SecStartup (
     Status = DisplaySplash ();
     AddMeasurePoint (0x3050);
     if (Status == EFI_NOT_FOUND) {
+      DEBUG ((DEBUG_INFO, "Display splash early setup failed, will retry after PCI enumeration.\n"));
       SplashPostPci = TRUE;
     }
   }
@@ -584,16 +576,11 @@ SecStartup (
   }
 
   // MP Init phase 1
-  if (FixedPcdGetBool (PcdSmpEnabled)) {
-    Status = MpInit (EnumMpInitWakeup);
-  } else {
-    DEBUG ((DEBUG_INIT, "BSP Init\n"));
-    BspInit ();
-  }
+  Status = MpInit (EnumMpInitWakeup);
   AddMeasurePoint (0x3060);
 
   // MP Init phase 2
-  if (FixedPcdGetBool (PcdSmpEnabled) && !EFI_ERROR (Status)) {
+  if (!EFI_ERROR (Status)) {
     Status = MpInit (EnumMpInitRun);
     AddMeasurePoint (0x3080);
   }

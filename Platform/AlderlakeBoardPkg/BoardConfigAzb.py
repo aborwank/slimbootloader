@@ -24,7 +24,7 @@ class Board(BaseBoard):
         super(Board, self).__init__(*args, **kwargs)
         self.VERINFO_IMAGE_ID                 = 'SB_AZB'
         self.VERINFO_PROJ_MAJOR_VER           = 1
-        self.VERINFO_PROJ_MINOR_VER           = 5
+        self.VERINFO_PROJ_MINOR_VER           = 7
         self.VERINFO_CORE_MAJOR_VER           = 1
         self.VERINFO_CORE_MINOR_VER           = 0
         self.VERINFO_SVN                      = 1
@@ -39,6 +39,7 @@ class Board(BaseBoard):
         self._FSP_PATH_NAME                   = 'Silicon/AlderlakePkg/Azb/FspBin'
         self.MICROCODE_INF_FILE               = 'Silicon/AlderlakePkg/Microcode/MicrocodeAzb.inf'
         self.FSP_INF_FILE                     = 'Silicon/AlderlakePkg/FspBin/FspBinAzb.inf'
+        self._SMBIOS_YAML_FILE                = os.path.join('Platform', self.BOARD_PKG_NAME, 'SmbiosStrings.yaml')
         self._LP_SUPPORT                      = True
         self._N_SUPPORT                       = False
         self._AZB_SUPPORT                     = True
@@ -78,7 +79,7 @@ class Board(BaseBoard):
         self.ENABLE_PCIE_PM                   = 1
         # 0: Disable  1: Enable  2: Auto (disable for UEFI payload, enable for others)
         # 3: Enable NOSMRR (for edk2-stable202411 and newer UEFI payload)  4: Auto NOSMRR
-        self.ENABLE_SMM_REBASE                = 4
+        self.ENABLE_SMM_REBASE                = 2
 
         # 0 - PCH UART0, 1 - PCH UART1, 2 - PCH UART2, 0xFF - EC UART 0x3F8
         self.DEBUG_PORT_NUMBER                = 0x0
@@ -177,7 +178,10 @@ class Board(BaseBoard):
         self.REDUNDANT_SIZE                   = ((self.REDUNDANT_SIZE + 0xFFFF) & ~0xFFFF)
         self.SIIPFW_SIZE                      = 0x1000
 
-        self.OS_LOADER_FD_SIZE                = 0x58000
+        if self._SMBIOS_YAML_FILE:
+            self.SIIPFW_SIZE += 0x1000
+
+        self.OS_LOADER_FD_SIZE                = 0x60000
         self.OS_LOADER_FD_NUMBLK              = self.OS_LOADER_FD_SIZE // self.FLASH_BLOCK_SIZE
 
         self.NON_REDUNDANT_SIZE               = 0x3BF000 + self.SIIPFW_SIZE
@@ -340,6 +344,9 @@ class Board(BaseBoard):
           # Name | Image File             |    CompressAlg  | AuthType                        | Key File                        | Region Align   | Region Size |  Svn Info
           # ========================================================================================================================================================
           ('IPFW',      'SIIPFW.bin',          '',     container_list_auth_type,   'KEY_ID_CONTAINER'+'_'+self._RSA_SIGN_TYPE,        0,          0     ,        0),   # Container Header
+        )
+        container_list.append (
+          ('SMBS',      'smbios.bin',    'Dummy',        container_list_auth_type,   'KEY_ID_CONTAINER'+'_'+self._RSA_SIGN_TYPE,            0,              0x1000,    0),   # SMBIOS Component
         )
 
         bins = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'Binaries')

@@ -50,11 +50,16 @@ LoadShellCommands (
     ShellCommandRegister (Shell, &ShellCommandFs);
     ShellCommandRegister (Shell, &ShellCommandUsbDev);
     ShellCommandRegister (Shell, &ShellCommandAcpi);
+    ShellCommandRegister (Shell, &ShellCommandFlashmap);
 
     // Load Platform specific shell commands
     ShellExtensionCmds = GetShellExtensionCmds ();
     for (Iter = ShellExtensionCmds; *Iter != NULL; Iter++) {
       ShellCommandRegister (Shell, *Iter);
+    }
+
+    if (FeaturePcdGet (PcdEnableSetup)) {
+      ShellCommandRegister (Shell, &ShellCommandSetup);;
     }
   }
 

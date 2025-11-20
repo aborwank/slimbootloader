@@ -1,7 +1,7 @@
 ## @file
 # This file is used to provide board specific image information.
 #
-#  Copyright (c) 2020 - 2024, Intel Corporation. All rights reserved.<BR>
+#  Copyright (c) 2020 - 2025, Intel Corporation. All rights reserved.<BR>
 #
 #  SPDX-License-Identifier: BSD-2-Clause-Patent
 #
@@ -24,7 +24,7 @@ class Board(BaseBoard):
 
         self.VERINFO_IMAGE_ID     = 'SB_MTLP'
         self.VERINFO_PROJ_MAJOR_VER = 1
-        self.VERINFO_PROJ_MINOR_VER = 1
+        self.VERINFO_PROJ_MINOR_VER = 3
         self.VERINFO_SVN            = 1
         self.VERINFO_BUILD_DATE     = time.strftime("%m/%d/%Y")
 
@@ -34,6 +34,7 @@ class Board(BaseBoard):
         self.FSP_IMAGE_ID         = '$MTLFSP$'
         self._EXTRA_INC_PATH      = ['Silicon/MeteorlakePkg/FspBin']
         self._FSP_PATH_NAME       = 'Silicon/MeteorlakePkg/FspBin'
+        self._SMBIOS_YAML_FILE    = os.path.join('Platform', self.BOARD_PKG_NAME, 'SmbiosStrings.yaml')
         self.FSP_INF_FILE         = 'Silicon/MeteorlakePkg/FspBin/FspBin.inf'
         self.MICROCODE_INF_FILE   = 'Silicon/MeteorlakePkg/Microcode/Microcode.inf'
 
@@ -152,7 +153,7 @@ class Board(BaseBoard):
         self.UCODE_SIZE           = 0x000B7000
         self.UCODE_SLOT_SIZE      = 0x00037000
         self.MRCDATA_SIZE         = 0x00010000
-        self.CFGDATA_SIZE         = 0x00004000
+        self.CFGDATA_SIZE         = 0x00005000
         self.KEYHASH_SIZE         = 0x00001000
         self.VARIABLE_SIZE        = 0x00002000
         self.SBLRSVD_SIZE         = 0x00001000
@@ -175,6 +176,9 @@ class Board(BaseBoard):
                                     self.CFGDATA_SIZE + self.KEYHASH_SIZE
 
         self.SIIPFW_SIZE = 0x1000
+
+        if self._SMBIOS_YAML_FILE:
+            self.SIIPFW_SIZE += 0x1000
 
         self.NON_REDUNDANT_SIZE   = 0x3BF000 + self.SIIPFW_SIZE
         self.NON_VOLATILE_SIZE    = 0x001000
@@ -320,6 +324,9 @@ class Board(BaseBoard):
           # Name | Image File             |    CompressAlg  | AuthType                        | Key File                        | Region Align   | Region Size |  Svn Info
           # ========================================================================================================================================================
           ('IPFW',      'SIIPFW.bin',          '',     container_list_auth_type,   'KEY_ID_CONTAINER'+'_'+self._RSA_SIGN_TYPE,        0,          0     ,        0),   # Container Header
+        )
+        container_list.append (
+          ('SMBS',      'smbios.bin',    'Dummy',        container_list_auth_type,   'KEY_ID_CONTAINER'+'_'+self._RSA_SIGN_TYPE,            0,              0x1000,    0),   # SMBIOS Component
         )
 
         return [container_list]

@@ -21,11 +21,10 @@
 #include <Library/ConfigDataLib.h>
 #include <Library/VariableLib.h>
 #include <Guid/GraphicsInfoHob.h>
-#include <Guid/SystemTableInfoGuid.h>
-#include <Guid/SerialPortInfoGuid.h>
 #include <Guid/SmmInformationGuid.h>
 #include <FspsUpd.h>
 #include <GlobalNvsAreaDef.h>
+#include <CpuNvsAreaDef.h>
 #include <ConfigDataDefs.h>
 #include <Library/BootloaderCoreLib.h>
 #include <IndustryStandard/Acpi.h>
@@ -86,6 +85,7 @@
 #include <Library/PciePm.h>
 #include <Library/PlatformInfo.h>
 #include <Library/PlatformHookLib.h>
+#include <Library/TxtLib.h>
 
 //
 // The EC implements an embedded controller interface at ports 0x60/0x64 and a ACPI compliant
@@ -477,161 +477,6 @@ ProgramSecuritySetting (
 }
 
 /**
-  Add a Smbios type string into a buffer
-
-**/
-STATIC
-EFI_STATUS
-AddSmbiosTypeString (
-  SMBIOS_TYPE_STRINGS  *Dest,
-  UINT8                 Type,
-  UINT8                 Index,
-  CHAR8                *String
-  )
-{
-  UINTN   Length;
-
-  Dest->Type    = Type;
-  Dest->Idx     = Index;
-  if (String != NULL) {
-    Length = AsciiStrLen (String);
-
-    Dest->String  = (CHAR8 *)AllocateZeroPool (Length + 1);
-    if (Dest->String == NULL) {
-      return EFI_OUT_OF_RESOURCES;
-    }
-    CopyMem (Dest->String, String, Length);
-  }
-
-  return EFI_SUCCESS;
-}
-
-/**
-  Initialize necessary information for Smbios
-
-  @retval EFI_SUCCESS             Initialized necessary information successfully
-  @retval EFI_OUT_OF_RESOURCES    Failed to allocate memory for Smbios info
-
-**/
-EFI_STATUS
-InitializeSmbiosInfo (
-  VOID
-  )
-{
-  CHAR8                 TempStrBuf[SMBIOS_STRING_MAX_LENGTH];
-  UINT16                Index;
-  UINT8                 BrdIdx;
-  UINTN                 Length;
-  SMBIOS_TYPE_STRINGS  *TempSmbiosStrTbl;
-  BOOT_LOADER_VERSION  *VerInfoTbl;
-  VOID                 *SmbiosStringsPtr;
-
-  Index         = 0;
-  TempSmbiosStrTbl  = (SMBIOS_TYPE_STRINGS *) AllocateTemporaryMemory (0);
-  if (TempSmbiosStrTbl == NULL) {
-    return EFI_OUT_OF_RESOURCES;
-  }
-  VerInfoTbl    = GetVerInfoPtr ();
-
-  //
-  // SMBIOS_TYPE_BIOS_INFORMATION
-  //
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_BIOS_INFORMATION,
-    1, "Intel Corporation");
-  if (VerInfoTbl != NULL) {
-    AsciiSPrint (TempStrBuf, sizeof (TempStrBuf),
-      "SB_TGL.%03d.%03d.%03d.%03d.%03d.%05d.%c-%016lX%a\0",
-      VerInfoTbl->ImageVersion.SecureVerNum,
-      VerInfoTbl->ImageVersion.CoreMajorVersion,
-      VerInfoTbl->ImageVersion.CoreMinorVersion,
-      VerInfoTbl->ImageVersion.ProjMajorVersion,
-      VerInfoTbl->ImageVersion.ProjMinorVersion,
-      VerInfoTbl->ImageVersion.BuildNumber,
-      VerInfoTbl->ImageVersion.BldDebug ? 'D' : 'R',
-      VerInfoTbl->SourceVersion,
-      VerInfoTbl->ImageVersion.Dirty ? "-dirty" : "");
-  } else {
-    AsciiSPrint (TempStrBuf, sizeof (TempStrBuf), "%a\0", "Unknown");
-  }
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_BIOS_INFORMATION,
-    2, TempStrBuf);
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_BIOS_INFORMATION,
-    3, __DATE__);
-
-  //
-  // SMBIOS_TYPE_SYSTEM_INFORMATION
-  //
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_SYSTEM_INFORMATION,
-    1, "Intel Corporation");
-
-  AsciiSPrint (TempStrBuf, sizeof (TempStrBuf), "%a\0", "TigerLake Client Platform");
-
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_SYSTEM_INFORMATION,
-    2, TempStrBuf);
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_SYSTEM_INFORMATION,
-    3, "0.1");
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_SYSTEM_INFORMATION,
-    4, "System Serial Number");
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_SYSTEM_INFORMATION,
-    5, "System SKU Number");
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_SYSTEM_INFORMATION,
-    6, "TigerLake Client System");
-
-  //
-  // SMBIOS_TYPE_BASEBOARD_INFORMATION
-  //
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_BASEBOARD_INFORMATION,
-    1, "Intel Corporation");
-  switch (GetPlatformId ()) {
-    case BoardIdTglUDdr4:
-      BrdIdx = 1;
-      break;
-    case BoardIdTglULp4Type4:
-      BrdIdx = 2;
-      break;
-    case BoardIdTglHDdr4SODimm:
-    case 0xF:
-      BrdIdx = 3;
-      break;
-    case BoardIdTglUpxi11:
-      BrdIdx = 4;
-      break;
-    default:
-      BrdIdx = 0;
-      break;
-  }
-  AsciiSPrint (TempStrBuf, sizeof (TempStrBuf), "%a\0", mBoardIdIndex[BrdIdx]);
-
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_BASEBOARD_INFORMATION,
-    2, TempStrBuf);
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_BASEBOARD_INFORMATION,
-    3, "1");
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_BASEBOARD_INFORMATION,
-    4, "Board Serial Number");
-
-  //
-  // SMBIOS_TYPE_PROCESSOR_INFORMATION : TBD
-  //
-
-  //
-  // SMBIOS_TYPE_END_OF_TABLE
-  //
-  AddSmbiosTypeString (&TempSmbiosStrTbl[Index++], SMBIOS_TYPE_END_OF_TABLE,
-    0, NULL);
-
-  Length = sizeof (SMBIOS_TYPE_STRINGS) * Index;
-  SmbiosStringsPtr = AllocatePool (Length);
-  if (SmbiosStringsPtr == NULL) {
-    return EFI_OUT_OF_RESOURCES;
-  }
-  CopyMem (SmbiosStringsPtr, TempSmbiosStrTbl, Length);
-  (VOID) PcdSet32S (PcdSmbiosStringsPtr, (UINT32)(UINTN)SmbiosStringsPtr);
-  (VOID) PcdSet16S (PcdSmbiosStringsCnt, Index);
-
-  return EFI_SUCCESS;
-}
-
-/**
   Clear SMI sources
 
 **/
@@ -868,10 +713,10 @@ BoardInit (
       }
     }
     //
-    // Initialize Smbios Info for SmbiosInit
+    // Override the Smbios default Info using SMBIOS binary blob
     //
     if (FeaturePcdGet (PcdSmbiosEnabled)) {
-      InitializeSmbiosInfo ();
+      LoadSmbiosStringsFromComponent (SIGNATURE_32 ('I', 'P', 'F', 'W'), SIGNATURE_32 ('S', 'M', 'B', 'S'));
       if (FeaturePcdGet (PcdEnableDts)) {
         ReadCpuDts ();
       }
@@ -899,6 +744,16 @@ BoardInit (
       }
     }
 
+    ///
+    /// Initialize TXT Before ACPI initialization.
+    /// This will update the correct TXT enabled state in ACPI table.
+    ///
+    if (FeaturePcdGet (PcdTxtEnabled)) {
+      FeaturesCfgData = (FEATURES_CFG_DATA *) FindConfigDataByTag(CDATA_FEATURES_TAG);
+      if (FeaturesCfgData->Features.TxtEnabled == 1) {
+          InitTxt();
+      }
+    }
     break;
   case PrePayloadLoading:
     if (FeaturePcdGet (PcdSmbiosEnabled) && FeaturePcdGet (PcdEnableDts)) {
@@ -1149,6 +1004,8 @@ UpdateFspConfig (
   UINT8                HdaVerbTableNum;
   FSP_INFO_HEADER      *FspHeader;
   UINT32               FspsBase;
+  FEATURES_CFG_DATA    *FeaturesCfgData;
+
 
   FspsBase = PcdGet32 (PcdFSPSBase);
   FspHeader = (FSP_INFO_HEADER *)(UINTN)(FspsBase + FSP_INFO_HEADER_OFF);
@@ -1273,6 +1130,14 @@ UpdateFspConfig (
 
   // Enable IEH
   FspsConfig->IehMode = 0x1;
+
+  if (FeaturePcdGet (PcdTxtEnabled)) {
+    FeaturesCfgData = (FEATURES_CFG_DATA *) FindConfigDataByTag(CDATA_FEATURES_TAG);
+    if (FeaturesCfgData->Features.TxtEnabled == 1) {
+      DEBUG((DEBUG_INFO, "Enabling TXT in FSP-S UPD's\n"));
+      FspsConfig->TxtEnable = 0x1;
+    }
+ }
 
   FspsConfig->SerialIoSpiMode[1] = 0x1;
   for (Index = 0; Index < GetPchMaxSerialIoSpiControllersNum (); Index++) {
@@ -1771,30 +1636,6 @@ UpdateSmmInfo (
 
 
 /**
-  Update Serial Interface Information for Payload
-
-  @param[in]  SerialPortInfo    Serial Interface Information to be updated for Payload
-
-**/
-VOID
-EFIAPI
-UpdateSerialPortInfo (
-  IN  SERIAL_PORT_INFO  *SerialPortInfo
-)
-{
-  SerialPortInfo->BaseAddr64 = GetSerialPortBase ();
-  SerialPortInfo->BaseAddr   = (UINT32) SerialPortInfo->BaseAddr64;
-  SerialPortInfo->RegWidth = GetSerialPortStrideSize();
-  if (GetDebugPort () >= PCH_MAX_SERIALIO_UART_CONTROLLERS) {
-    // IO Type
-    SerialPortInfo->Type = 1;
-  } else {
-    // MMIO Type
-    SerialPortInfo->Type = 2;
-  }
-}
-
-/**
  Update Hob Info with platform specific data
 
  @param  Guid          The GUID to tag the customized HOB.
@@ -1815,8 +1656,6 @@ PlatformUpdateHobInfo (
     UpdateFrameBufferInfo (HobInfo);
   } else if (Guid == &gEfiGraphicsDeviceInfoHobGuid) {
     UpdateFrameBufferDeviceInfo (HobInfo);
-  } else if (Guid == &gLoaderSerialPortInfoGuid) {
-    UpdateSerialPortInfo (HobInfo);
   } else if (Guid == &gOsBootOptionGuid) {
     UpdateOsBootMediumInfo (HobInfo);
   } else if (Guid == &gSmmInformationGuid) {
@@ -2397,9 +2236,27 @@ UpdateCpuNvs (
     CpuNvs->DtsIoTrapLength = DTS_IO_TRAP_LENGTH;
     CpuNvs->DtsAcpiEnable = DTS_ACPI_DISABLE;
   }
+
+  ///
+  /// Update TXT status for ACPI
+  ///
+  CpuNvs->TxtEnabled = 0;  // Default to disabled
+  if (FeaturePcdGet (PcdTxtEnabled)) {
+    FEATURES_CFG_DATA *FeaturesCfgData;
+    FeaturesCfgData = (FEATURES_CFG_DATA *) FindConfigDataByTag(CDATA_FEATURES_TAG);
+    if ((FeaturesCfgData != NULL) && (FeaturesCfgData->Features.TxtEnabled == 1)) {
+      if (IsTxtEnabled()) {
+        CpuNvs->TxtEnabled = 1;
+        DEBUG ((DEBUG_INFO, "TXT is enabled in MSR 0x3A, setting TXTE=1\n"));
+      } else {
+        DEBUG ((DEBUG_INFO, "TXT config enabled but MSR 0x3A indicates TXT not enabled.\n"));
+      }
+    }
+  }
+
   DEBUG ((DEBUG_INFO, "Update Cpu Nvs Done\n"));
 
-  DEBUG ((DEBUG_INFO, "Revision 0x%X, PpmFlags 0x%08X\n", CpuNvs->Revision, CpuNvs->PpmFlags));
+  DEBUG ((DEBUG_INFO, "Revision 0x%X, PpmFlags 0x%08X, TxtEnabled 0x%X\n", CpuNvs->Revision, CpuNvs->PpmFlags, CpuNvs->TxtEnabled));
 }
 
 /**

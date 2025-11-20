@@ -26,6 +26,8 @@
 #include <Library/BaseMemoryLib.h>
 #include <GpioPinsVer2Lp.h>
 #include <Library/FusaConfigLib.h>
+#include <FirmwareInterfaceTable.h>
+#include <Library/TxtLib.h>
 
 #include "BoardSaConfigPreMem.h"
 
@@ -95,6 +97,33 @@ TccModePreMemConfig (
   return EFI_SUCCESS;
 }
 #endif
+
+VOID *
+FindBiosAcm ()
+{
+  FIRMWARE_INTERFACE_TABLE_ENTRY *FitEntry;
+  UINT32                         EntryNum;
+  UINT64                         FitTableOffset;
+  UINT32                         Index;
+  FitTableOffset = *(UINT64 *)(UINTN)(BASE_4GB - 0x40);
+  FitEntry = (FIRMWARE_INTERFACE_TABLE_ENTRY *)(UINTN)FitTableOffset;
+  if (FitEntry != NULL) {
+    if (FitEntry[0].Address != *(UINT64 *)"_FIT_   ") {
+      return NULL;
+    }
+    if (FitEntry[0].Type != FIT_TABLE_TYPE_HEADER) {
+      return NULL;
+    }
+    EntryNum = *(UINT32 *)(&FitEntry[0].Size[0]) & 0xFFFFFF;
+    for (Index = 0; Index < EntryNum; Index++) {
+      if (FitEntry[Index].Type == FIT_TABLE_TYPE_STARTUP_ACM) {
+        DEBUG ((DEBUG_INFO, "BiosAcm Location : 0x%X\n", (VOID *)(UINTN)FitEntry[Index].Address));
+        return (VOID *)(UINTN)FitEntry[Index].Address;
+      }
+    }
+  }
+  return NULL;
+}
 
 /**
   Update FSP-M UPD config data.
@@ -231,10 +260,31 @@ UpdateFspConfig (
   Fspmcfg->FClkFrequency        = MemCfgData->FClkFrequency;
   Fspmcfg->TxtDprMemoryBase     = MemCfgData->TxtDprMemoryBase;
   Fspmcfg->TxtDprMemorySize     = MemCfgData->TxtDprMemorySize;
-  Fspmcfg->SinitMemorySize      = MemCfgData->SinitMemorySize;
-  Fspmcfg->TxtHeapMemorySize    = MemCfgData->TxtHeapMemorySize;
+  //Fspmcfg->SinitMemorySize      = MemCfgData->SinitMemorySize;
+  //Fspmcfg->TxtHeapMemorySize    = MemCfgData->TxtHeapMemorySize;
   Fspmcfg->BiosSize             = MemCfgData->BiosSize;
-  Fspmcfg->BiosAcmBase          = MemCfgData->BiosAcmBase;
+  //Fspmcfg->BiosAcmBase          = MemCfgData->BiosAcmBase;
+  //IoWrite8 (0x74, 0x21);
+  //UINT8 CmosTxtEnable = IoRead8  (0x75) ;
+  //DEBUG((DEBUG_INFO, "CmosTxtEnable %x .....\n", CmosTxtEnable));
+  //if (CmosTxtEnable == 0xA) {
+    DEBUG((DEBUG_INFO, "RPL:Enabling TXT in FSP-M UPD's\n"));
+    Fspmcfg->Txt                  = 0x1;
+    Fspmcfg->TxtImplemented       = 0x1;
+    Fspmcfg->SinitMemorySize      = 0x50000;
+    Fspmcfg->TxtHeapMemorySize    = 0xF0000;
+    Fspmcfg->BiosAcmBase          = (UINTN)FindBiosAcm();
+  //} else if (CmosTxtEnable == 0xB){
+  //  DEBUG((DEBUG_INFO, "Initiating ACheck Request in FSP-M UPD's\n"));
+  //  Fspmcfg->Txt                  = 0x1;
+  //  Fspmcfg->TxtImplemented       = 0x1;
+  //  Fspmcfg->SinitMemorySize      = 0x50000;
+  //  Fspmcfg->TxtHeapMemorySize    = 0xF0000;
+  //  Fspmcfg->BiosAcmBase          = (UINTN)FindBiosAcm();
+  //} else {
+  //  DEBUG((DEBUG_INFO, "Disabling TXT in FSP-M UPD's\n"));
+  //}
+
   Fspmcfg->BiosGuard            = 0x0; // Need to disable, else it will fails in FSPS
   Fspmcfg->BiosGuardToolsInterface = 1;
 
@@ -352,7 +402,8 @@ UpdateFspConfig (
   Fspmcfg->WrcFeatureEnable           = MemCfgData->WrcFeatureEnable;
   Fspmcfg->HyperThreading             = MemCfgData->HyperThreading;
   Fspmcfg->GtClosEnable               = MemCfgData->GtClosEnable;
-  Fspmcfg->VmxEnable                  = MemCfgData->VmxEnable;
+  //Fspmcfg->VmxEnable                  = MemCfgData->VmxEnable;
+  Fspmcfg->VmxEnable    = 0x1;
   Fspmcfg->Lp5BankMode                = MemCfgData->Lp5BankMode;
   Fspmcfg->DisableStarv2medPrioOnNewReq = MemCfgData->DisableStarv2medPrioOnNewReq;
 

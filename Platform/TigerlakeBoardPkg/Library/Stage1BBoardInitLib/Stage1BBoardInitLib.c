@@ -41,6 +41,8 @@
 #include <Library/WatchDogTimerLib.h>
 #include <Library/SocInitLib.h>
 #include <Library/TccLib.h>
+#include <FirmwareInterfaceTable.h>
+#include <Library/TxtLib.h>
 
 CONST PLT_DEVICE  mPlatformDevices[]= {
   {{0x00001700}, OsBootDeviceSata  , 0 },
@@ -99,6 +101,37 @@ TccModePreMemConfig (
   return EFI_SUCCESS;
 }
 #endif
+
+// FIT Table Types required to get ACM base address for TXT upds
+#define FIT_TABLE_TYPE_STARTUP_ACM           0x2
+#define FIT_TABLE_TYPE_HEADER                0x0
+
+VOID *
+FindBiosAcm ()
+{
+  FIRMWARE_INTERFACE_TABLE_ENTRY *FitEntry;
+  UINT32                         EntryNum;
+  UINT64                         FitTableOffset;
+  UINT32                         Index;
+  FitTableOffset = *(UINT64 *)(UINTN)(BASE_4GB - 0x40);
+  FitEntry = (FIRMWARE_INTERFACE_TABLE_ENTRY *)(UINTN)FitTableOffset;
+  if (FitEntry != NULL) {
+    if (FitEntry[0].Address != *(UINT64 *)"_FIT_   ") {
+      return NULL;
+    }
+    if (FitEntry[0].Type != FIT_TABLE_TYPE_HEADER) {
+      return NULL;
+    }
+    EntryNum = *(UINT32 *)(&FitEntry[0].Size[0]) & 0xFFFFFF;
+    for (Index = 0; Index < EntryNum; Index++) {
+      if (FitEntry[Index].Type == FIT_TABLE_TYPE_STARTUP_ACM) {
+        DEBUG ((DEBUG_INFO, "BiosAcm Location : 0x%X\n", (VOID *)(UINTN)FitEntry[Index].Address));
+        return (VOID *)(UINTN)FitEntry[Index].Address;
+      }
+    }
+  }
+  return NULL;
+}
 
 /**
   Update FSP-M UPD config data
@@ -253,7 +286,6 @@ UpdateFspConfig (
   Fspmcfg->X2ApicOptOut         = MemCfgData->X2ApicOptOut;
   Fspmcfg->DmaControlGuarantee  = MemCfgData->DmaControlGuarantee;
   Fspmcfg->TxtDprMemorySize     = MemCfgData->TxtDprMemorySize;
-  Fspmcfg->BiosAcmBase          = MemCfgData->BiosAcmBase;
 
   Fspmcfg->UserBd               = MemCfgData->UserBd;
   Fspmcfg->RealtimeMemoryTiming = MemCfgData->RealtimeMemoryTiming;
@@ -355,6 +387,33 @@ UpdateFspConfig (
 
   Fspmcfg->BiosGuard = 0x0;               // Need disable, else it will failed in fSPS
   Fspmcfg->SafeMode = 0x1;                // Need enable, else failed in MRC
+
+  // TXT Configuration
+  FeaturesCfgData = (FEATURES_CFG_DATA *) FindConfigDataByTag(CDATA_FEATURES_TAG);
+  if ((FeaturesCfgData->Features.TxtEnabled == 1) &&
+      (FeaturePcdGet (PcdTxtEnabled))) {
+    DEBUG((DEBUG_INFO, "Enabling TXT in FSP-M UPD's\n"));
+    Fspmcfg->Txt                  = 0x1;
+    Fspmcfg->TxtImplemented       = 0x1;
+    Fspmcfg->SinitMemorySize      = 0x50000;
+    Fspmcfg->TxtHeapMemorySize    = 0xF0000;
+    Fspmcfg->BiosAcmBase          = (UINT32)(UINTN)FindBiosAcm();
+    Fspmcfg->VmxEnable            = 1;    // Txt need enable VMX
+
+    IoWrite8 (R_IOPORT_CMOS_STANDARD_INDEX, TXT_CMOS_STATUS_REG);
+    UINT8 CmosData = IoRead8 (R_IOPORT_CMOS_STANDARD_DATA);
+    if (!(CmosData & BIT4)) {
+      CmosData |= BIT4;
+      IoWrite8 (R_IOPORT_CMOS_STANDARD_INDEX, TXT_CMOS_STATUS_REG);
+      IoWrite8 (R_IOPORT_CMOS_STANDARD_DATA, CmosData);
+    }
+  } else {
+    IoWrite8 (R_IOPORT_CMOS_STANDARD_INDEX, TXT_CMOS_STATUS_REG);
+    UINT8 CmosData = IoRead8 (R_IOPORT_CMOS_STANDARD_DATA);
+    CmosData &= ~BIT4;
+    IoWrite8 (R_IOPORT_CMOS_STANDARD_INDEX, TXT_CMOS_STATUS_REG);
+    IoWrite8 (R_IOPORT_CMOS_STANDARD_DATA, CmosData);
+  }
 
   // IBECC configuration
   Fspmcfg->Ibecc                    = MemCfgData->Ibecc;
@@ -551,8 +610,8 @@ PlatformFeaturesInit (
   VOID
   )
 {
-  FEATURES_CFG_DATA           *FeaturesCfgData;
-  PLATFORM_DATA               *PlatformData;
+  FEATURES_CFG_DATA           *FeaturesCfgData = NULL;
+  PLATFORM_DATA               *PlatformData = NULL;
   UINTN                        HeciBaseAddress;
   UINT32                       LdrFeatures;
 
@@ -563,7 +622,7 @@ PlatformFeaturesInit (
   LdrFeatures |= FeaturePcdGet (PcdMeasuredBootEnabled)?FEATURE_MEASURED_BOOT:0;
 
   // Disable feature by configuration data.
-  FeaturesCfgData = (FEATURES_CFG_DATA *) FindConfigDataByTag(CDATA_FEATURES_TAG);
+  FeaturesCfgData = (FEATURES_CFG_DATA *) FindConfigDataByTag (CDATA_FEATURES_TAG);
   if (FeaturesCfgData != NULL) {
     if (FeaturesCfgData->Features.Acpi == 0) {
       LdrFeatures &= ~FEATURE_ACPI;
@@ -573,7 +632,7 @@ PlatformFeaturesInit (
       LdrFeatures &= ~FEATURE_MEASURED_BOOT;
     }
   } else {
-    DEBUG ((DEBUG_INFO, "FEATURES CFG DATA NOT FOUND!\n"));
+    DEBUG((DEBUG_ERROR, "FEATURES_CFG_DATA is NULL\n"));
   }
 
   // Disable features by boot guard profile
@@ -587,15 +646,28 @@ PlatformFeaturesInit (
                         );
     GetBootGuardInfo (HeciBaseAddress, &PlatformData->BtGuardInfo);
     DEBUG ((DEBUG_INFO, "GetPlatformDataPtr is copied 0x%08X \n", PlatformData));
-    if (!PlatformData->BtGuardInfo.MeasuredBoot) {
-      LdrFeatures &= ~FEATURE_MEASURED_BOOT;
-    }
     if (!PlatformData->BtGuardInfo.VerifiedBoot) {
       LdrFeatures &= ~FEATURE_VERIFIED_BOOT;
     }
+  } else {
+    DEBUG((DEBUG_ERROR, "PLATFORM_DATA is NULL\n"));
   }
 
   SetFeatureCfg (LdrFeatures);
+}
+
+/**
+  Disable measured boot in SBL
+**/
+VOID
+DisableMeasuredBoot (
+  VOID
+  )
+{
+  UINT32    Features;
+  Features  = GetFeatureCfg ();
+  Features &= (UINT32)(~FEATURE_MEASURED_BOOT);
+  SetFeatureCfg (Features);
 }
 
 /**
@@ -608,38 +680,48 @@ TpmInitialize (
 {
   EFI_STATUS                   Status;
   UINT8                        BootMode;
-  PLATFORM_DATA               *PlatformData;
-  UINT32                       Features;
+  PLATFORM_DATA               *PlatformData = NULL;
+  BOOT_LOADER_VERSION         *BlVersion = NULL;
 
   BootMode     = GetBootMode();
   PlatformData = (PLATFORM_DATA *)GetPlatformDataPtr ();
+  BlVersion    = GetVerInfoPtr ();
 
-  if((PlatformData != NULL) && PlatformData->BtGuardInfo.MeasuredBoot &&
-    (!PlatformData->BtGuardInfo.DisconnectAllTpms) &&
-    ((PlatformData->BtGuardInfo.TpmType == dTpm20) || (PlatformData->BtGuardInfo.TpmType == Ptt))){
+  if (PlatformData == NULL ||
+     (PlatformData->BtGuardInfo.BootGuardCapability &&
+      PlatformData->BtGuardInfo.DisconnectAllTpms)) {
+    DEBUG ((DEBUG_ERROR, "Tpm set to be disabled by ACM !! \n"));
+    DisableTpm ();
+    DisableMeasuredBoot ();
+    return;
+  }
 
-    //  As per PC Client spec, SRTM should perform a host platform reset
+  if (PlatformData->BtGuardInfo.BootGuardCapability &&
+      PlatformData->BtGuardInfo.MeasuredBoot) {
+    //  As per PC Client spec, if TPM startup failed in ACM on S3 resume, reset
     if (PlatformData->BtGuardInfo.TpmStartupFailureOnS3) {
-      ResetSystem(EfiResetCold);
+      ResetSystem (EfiResetCold);
       CpuDeadLoop ();
     }
-
-    // Initialize TPM if it has not already been initialized by BootGuard component (i.e. ACM)
-    Status = TpmInit(PlatformData->BtGuardInfo.BypassTpmInit, BootMode);
+    // If measured boot enabled in ACM, let ACM decide on if TPM is initialized here
+    Status = TpmInit (PlatformData->BtGuardInfo.BypassTpmInit, BootMode);
     if (EFI_ERROR (Status)) {
-      CpuHalt ("Tpm Initialization failed !!\n");
-    } else {
-      if (BootMode != BOOT_ON_S3_RESUME) {
-        // Create and add BootGuard Event logs in TCG Event log
-        CreateTpmEventLog (PlatformData->BtGuardInfo.TpmType);
-      }
+      DEBUG ((DEBUG_ERROR, "Tpm Initialization failed  %r !! \n", Status));
+      DisableMeasuredBoot ();
+    } else if (BootMode != BOOT_ON_S3_RESUME) {
+      // Add BtG events to TPM event log
+      CreateTpmEventLog (PlatformData->BtGuardInfo.TpmType);
     }
-  } else {
-    DisableTpm();
-
-    Features  = GetFeatureCfg ();
-    Features &= (UINT32)(~FEATURE_MEASURED_BOOT);
-    SetFeatureCfg (Features);
+  } else if (MEASURED_BOOT_ENABLED ()) {
+    // If measured boot enabled in SBL but not in ACM, force TPM initialization here
+    Status = TpmInit (FALSE, BootMode);
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "Tpm Initialization failed  %r !! \n", Status));
+      DisableMeasuredBoot ();
+    } else if (BootMode != BOOT_ON_S3_RESUME) {
+      // Add only CRTM version event to TPM event log at this point
+      TpmLogCrtmVersionEvent (BlVersion);
+    }
   }
 }
 
@@ -813,9 +895,7 @@ DEBUG_CODE_END();
   case PreTempRamExit:
     break;
   case PostTempRamExit:
-    if (MEASURED_BOOT_ENABLED()) {
-      TpmInitialize();
-    }
+    TpmInitialize();
     break;
   default:
     break;

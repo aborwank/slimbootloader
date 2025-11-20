@@ -1,6 +1,6 @@
 /** @file
 
-  Copyright (c) 2020 - 2024, Intel Corporation. All rights reserved.<BR>
+  Copyright (c) 2020 - 2025, Intel Corporation. All rights reserved.<BR>
   SPDX-License-Identifier: BSD-2-Clause-Patent
 
 **/
@@ -8,6 +8,7 @@
 #include <Library/TpmLib.h>
 #include <PlatformData.h>
 #include <Library/MeExtMeasurementLib.h>
+#include <Library/TxtLib.h>
 #include "Stage2BoardInitLib.h"
 
 #define MWAIT_C6                     0x20
@@ -56,7 +57,7 @@ CONST PCH_SERIAL_IO_CONFIG_INFO mPchSSerialIoI2CMode[PCH_MAX_SERIALIO_I2C_CONTRO
 CONST PCH_SERIAL_IO_UART_CONFIG_INFO mPchSSerialIoUartMode[PCH_MAX_SERIALIO_UART_CONTROLLERS] = {
   {0,R_VER4_SERIAL_IO_PCR_PCICFGCTRL_UART0, 1, 2, 16 },
   {0,R_VER4_SERIAL_IO_PCR_PCICFGCTRL_UART1, 1, 2, 17 },
-  {2,R_VER4_SERIAL_IO_PCR_PCICFGCTRL_UART2, 1, 2, 33 },
+  {2,R_VER4_SERIAL_IO_PCR_PCICFGCTRL_UART2, 1, 2, 42 },
   {0,R_VER4_SERIAL_IO_PCR_PCICFGCTRL_UART3, 0, 0, 0 },
   {0,R_VER4_SERIAL_IO_PCR_PCICFGCTRL_UART4, 0, 0, 0 },
   {0,R_VER4_SERIAL_IO_PCR_PCICFGCTRL_UART5, 0, 0, 0 },
@@ -561,7 +562,7 @@ UpdateCpuNvs (
   ///
   /// Update NVS ASL items.
   ///
-  CpuNvs->Cpuid = GetCpuFamily() | GetCpuStepping();
+  CpuNvs->Cpuid = (UINT32)GetCpuFamily() | (UINT32)GetCpuStepping();
   CpuNvs->Revision = 1;
 
   ///
@@ -731,6 +732,23 @@ UpdateCpuNvs (
   CpuNvs->ScalingFactorBigCore=15;
   //DEBUG ((DEBUG_INFO, "BigCore Count %d SmallCore Count %d\n",CpuNvs->BigCoreCount, CpuNvs->SmallCoreCount));
 
+  ///
+  /// Update TXT status for ACPI
+  ///
+  CpuNvs->TxtEnabled = 0;  // Default to disabled
+  if (FeaturePcdGet (PcdTxtEnabled)) {
+    FEATURES_CFG_DATA *FeaturesCfgData;
+    FeaturesCfgData = (FEATURES_CFG_DATA *) FindConfigDataByTag(CDATA_FEATURES_TAG);
+    if ((FeaturesCfgData != NULL) && (FeaturesCfgData->Features.TxtEnabled == 1)) {
+      if (IsTxtEnabled()) {
+        CpuNvs->TxtEnabled = 1;
+        DEBUG ((DEBUG_INFO, "TXT is enabled in MSR 0x3A, setting TXTE=1\n"));
+      } else {
+        DEBUG ((DEBUG_INFO, "TXT config enabled but MSR 0x3A indicates TXT not enabled.\n"));
+      }
+    }
+  }
+
   DEBUG ((DEBUG_INFO, "Update Cpu Nvs Done\n"));
 }
 
@@ -893,7 +911,11 @@ PlatformUpdateAcpiGnvs (
   Length = GetPchMaxSerialIoUartControllersNum ();
   for (Index = 0; Index < Length ; Index++) {
     PchNvs->UM0[Index] = FspsConfig->SerialIoUartMode[Index];
-    PchNvs->UC0[Index] = SerialIoUartPciCfgBase(Index);
+    if (FspsConfig->SerialIoUartMode[Index] == 3) { // for SerialIoUartCom only
+      PchNvs->UC0[Index] = (UINT64)(PCH_SERIAL_IO_BASE_ADDRESS + 0x1F000 + (0x2000 * Index));
+    } else {
+      PchNvs->UC0[Index] = SerialIoUartPciCfgBase(Index);
+    }
     PchNvs->UD0[Index] = FspsConfig->SerialIoUartDmaEnable[Index];
     PchNvs->UP0[Index] = FspsConfig->SerialIoUartPowerGating[Index];
     PchNvs->UI0[Index] = mPchSSerialIoUartMode[Index].SerialIoUARTIrq;

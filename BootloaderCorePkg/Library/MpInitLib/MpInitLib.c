@@ -313,39 +313,6 @@ ApFunc (
 
 
 /**
-  BSP initialization routine.
-
-**/
-VOID
-BspInit (
-  VOID
-  )
-{
-
-  mSysCpuInfo.CpuCount = 1;
-  mSysCpuTask.CpuCount = 1;
-
-  mMpDataStruct.SmmRebaseDoneCounter = 0;
-
-  //
-  // CPU specific init
-  //
-  CpuInit (0);
-  DEBUG ((DEBUG_INFO, " BSP APIC ID: %d\n", mSysCpuInfo.CpuInfo[0].ApicId));
-
-
-  if ((PcdGet8 (PcdSmmRebaseMode) == SMM_REBASE_ENABLE) || (PcdGet8 (PcdSmmRebaseMode) == SMM_REBASE_ENABLE_NOSMRR) ||
-    (mMpDataStruct.SmmRebaseDoneCounter > 0)) {
-    // Check SMM rebase result
-    if (mMpDataStruct.SmmRebaseDoneCounter != 1) {
-      CpuHalt ("CPU SMM rebase failed!\n");
-    }
-  }
-
-}
-
-
-/**
   Multiprocessor Initialization.
 
   @param[in]  Phase       Initialization phase for MP.
@@ -386,7 +353,7 @@ MpInit (
       InitializeSpinLock (&mMpDataStruct.SpinLock);
 
       //
-      // Allocate 1 K * 16 AP Stack, assume to support max 16 CPUs
+      // Allocate 4K * 16 AP Stack, assume to support max 16 CPUs
       //
       ApStackTop = (EFI_PHYSICAL_ADDRESS) (UINTN)AllocatePages ( \
                    EFI_SIZE_TO_PAGES (PcdGet32 (PcdCpuMaxLogicalProcessorNumber) * AP_STACK_SIZE));
